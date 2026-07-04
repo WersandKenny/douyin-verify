@@ -11,19 +11,76 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - run: |
+      - name: 验证
+        run: |
           node -e '
           const https = require("https");
-          function fetch(url) {
+
+          function get(url, n) {
             return new Promise((resolve, reject) => {
+              if (n <= 0) return reject(Error("too many"));
               const u = new URL(url);
-              const req = https.request({hostname: u.hostname, path: u.pathname+u.search,
-                headers: {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                  "Accept": "text/html,*/*", "Referer": "https://www.douyin.com/"}, timeout: 20000
-              }, r => { let d=""; r.on("data",c=>d+=c); r.on("end",()=>console.log(JSON.stringify({status:r.statusCode,size:d.length,hasInit:d.includes("__INITIAL_STATE__"),hasRender:d.includes("RENDER_DATA"),isCaptcha:d.includes("验证码")}))); });
-              req.on("error",e=>console.error(e.message)).on("timeout",function(){req.destroy();console.error("timeout")}); req.end();
+              const req = https.request({hostname: u.hostname, path: u.pathname + u.search,
+                headers: {"User-Agent": "Mozilla/5.0",
+                  "Accept": "text/html,*/*", "Referer": "https://www.douyin.com/"
+                }, timeout: 20000
+              }, (res) => {
+                let d = "";
+                res.on("data", c => d += c);
+                res.on("end", () => {
+                  const loc = res.headers.location;
+                  if ([301,302,303,307,308].includes(res.statusCode) && loc) {
+                    get(loc.startsWith("http") ? loc : u.origin + loc, n-1).then(resolve).catch(reject);
+                  } else {
+                    resolve({status: res.statusCode, body: d});
+                  }
+                });
+              });
+              req.on("error", reject).on("timeout", function(){req.destroy();reject(Error("timeout"))});
+              req.end();
             });
           }
-          const url = process.argv[1] || "https://v.douyin.com/Y27sEJPljzM/";
-          fetch(url).then(() => fetch("https://www.douyin.com/video/"+url.match(/video\/(\d+)/)?.[1]));
+
+          (async () => {
+            const rawUrl = process.argv[1];
+            console.log("=== 验证 ===");
+            console.log("输入:", rawUrl);
+
+            const r1 = await get(rawUrl, 5);
+            console.log("\n1. 短链解析 -> HTTP", r1.status, " SIZE", r1.body.length);
+            let videoId = r1.body.match(/video\/(\d+)/)?.[1];
+            if (!videoId) videoId = r1.body.match(/video%2F(\d+)/)?.[1];
+            if (!videoId) {
+              const href = r1.body.match(/href="([^"]+)"/)?.[1] || "";
+              videoId = href.match(/video\/(\d+)/)?.[1];
+            }
+            console.log("   videoId:", videoId || "❌");
+
+            console.log("\n2. 请求抖音视频页面...");
+            const r2 = await get("https://www.douyin.com/video/" + videoId, 5);
+            console.log("   HTTP", r2.status, " SIZE", r2.body.length);
+            console.log("   含__INITIAL_STATE__:", r2.body.includes("__INITIAL_STATE__") ? "✅" : "❌");
+            console.log("   含RENDER_DATA:", r2.body.includes("RENDER_DATA") ? "✅" : "❌");
+            console.log("   含验证码:", r2.body.includes("验证码") ? "⚠️" : "✅");
+
+            if (r2.body.includes("__INITIAL_STATE__")) {
+              const m = r2.body.match(/window\.__INITIAL_STATE__\s*=\s*({.+?});?\s*(?:<\/script>|$)/s);
+              if (m) try {
+                const s = JSON.parse(m[1]);
+                for (const obj of [s, ...Object.values(s)]) {
+                  const d = obj?.aweme_detail || obj?.aweme?.detail;
+                  const v = d?.video;
+                  if (v?.play_addr?.url_list?.[0]) {
+                    console.log("\n✅ 视频地址:", v.play_addr.url_list[0].slice(0, 120));
+                  }
+                }
+              } catch(e) { console.log("   解析失败:", e.message); }
+            } else if (r2.body.includes("RENDER_DATA")) {
+              console.log("\n   找到RENDER_DATA，需进一步解析");
+            }
+
+            if (r2.body.length > 1000 && !r2.body.includes("验证码")) {
+              console.log("\n   页面开头200字:", r2.body.slice(0, 200));
+            }
+          })();
           ' '${{ github.event.inputs.url }}'
