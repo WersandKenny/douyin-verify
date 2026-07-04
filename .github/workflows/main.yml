@@ -11,4 +11,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - run: curl -s --max-time 30 "https://douyin-proxy.nosy-catsup.workers.dev/?url=${{ github.event.inputs.url }}"
+      - run: |
+          echo "=== 测试1: 直连抖音短链 ==="
+          curl -sv --max-time 20 "https://v.douyin.com/Y27sEJPljzM/" 2>&1 | head -30
+          echo ""
+          echo "=== 测试2: Cloudflare Worker ==="
+          curl -s --max-time 30 "https://douyin-proxy.giant-calliandra.workers.dev/?url=https://v.douyin.com/Y27sEJPljzM/"
