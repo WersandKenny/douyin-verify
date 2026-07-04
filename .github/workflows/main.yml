@@ -1,0 +1,29 @@
+name: 抖音验证
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: '抖音分享链接'
+        required: true
+        default: 'https://v.douyin.com/Y27sEJPljzM/'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          node -e '
+          const https = require("https");
+          function fetch(url) {
+            return new Promise((resolve, reject) => {
+              const u = new URL(url);
+              const req = https.request({hostname: u.hostname, path: u.pathname+u.search,
+                headers: {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                  "Accept": "text/html,*/*", "Referer": "https://www.douyin.com/"}, timeout: 20000
+              }, r => { let d=""; r.on("data",c=>d+=c); r.on("end",()=>console.log(JSON.stringify({status:r.statusCode,size:d.length,hasInit:d.includes("__INITIAL_STATE__"),hasRender:d.includes("RENDER_DATA"),isCaptcha:d.includes("验证码")}))); });
+              req.on("error",e=>console.error(e.message)).on("timeout",function(){req.destroy();console.error("timeout")}); req.end();
+            });
+          }
+          const url = process.argv[1] || "https://v.douyin.com/Y27sEJPljzM/";
+          fetch(url).then(() => fetch("https://www.douyin.com/video/"+url.match(/video\/(\d+)/)?.[1]));
+          ' '${{ github.event.inputs.url }}'
